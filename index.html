@@ -877,15 +877,7 @@
 
 </div><!-- end #app-container -->
 
-<!-- Hidden SoundCloud widget iframe (must be in DOM for audio to work) -->
-<iframe id="sc-iframe"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/larryfisherman/sets/swimming&auto_play=false&buying=false&liking=false&download=false&sharing=false&show_comments=false&show_user=false&hide_related=true&visual=false&callback=true"
-  style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;border:0;"
-  allow="autoplay"
-  scrolling="no">
-</iframe>
-
-<script src="https://w.soundcloud.com/player/api.js"></script>
+<audio id="player-audio" preload="metadata" style="display:none"></audio>
 <script>
   // ─── Track colors (fallback while art loads / if no art) ───
   const TRACK_COLORS = [
@@ -896,7 +888,8 @@
 
   // ─── State ─────────────────────────────────────────
   let tracks = [];
-  let widget = null;
+  let audio  = null;
+  let skipTo = () => {}; // stubbed until initPlayer runs
 
   const state = {
     index: 0,
@@ -1024,7 +1017,7 @@
 
       item.appendChild(thumb);
       item.appendChild(info);
-      item.addEventListener('click', () => { if (widget) widget.skip(i); });
+      item.addEventListener('click', () => skipTo(i));
       queueEl.appendChild(item);
     });
   }
@@ -1050,74 +1043,168 @@
 
       item.appendChild(thumb);
       item.appendChild(info);
-      item.addEventListener('click', () => { if (widget) widget.skip(i); });
+      item.addEventListener('click', () => skipTo(i));
       queuePanelInner.appendChild(item);
     });
   }
 
-  // ─── SoundCloud Widget ─────────────────────────────
-  function initWidget() {
-    widget = SC.Widget(document.getElementById('sc-iframe'));
+  // ─── Jamendo playlist ──────────────────────────────
+  const JAMENDO_ID      = 'b06bbe12';
+  const PLAYLIST_KEY    = 'mp_playlist_v2';
+  const HISTORY_KEY     = 'mp_history_v2';
 
-    widget.bind(SC.Widget.Events.READY, () => {
-      widget.getSounds((sounds) => {
-        tracks = sounds.map((s, i) => ({
-          title:    s.title,
-          artist:   s.user ? s.user.username : 'Mac Miller',
-          duration: Math.round(s.duration / 1000),
-          cover:    s.artwork_url ? s.artwork_url.replace('-large', '-t500x500') : null,
-          color:    TRACK_COLORS[i % TRACK_COLORS.length],
-        }));
-        state.index = 0;
-        state.currentTime = 0;
-        renderTrack();
-        renderPlayState();
-      });
-    });
+  async function getHanoiWeatherCode() {
+    try {
+      const res = await fetch(
+        'https://api.open-meteo.com/v1/forecast' +
+        '?latitude=21.0285&longitude=105.8542' +
+        '&hourly=weathercode&timezone=Asia%2FBangkok&forecast_days=1'
+      );
+      const d = await res.json();
+      return d.hourly.weathercode[7]; // 7 AM Hanoi local time
+    } catch (_) { return 3; }
+  }
 
-    // Fires whenever a track starts playing (including after skip/next/prev)
-    widget.bind(SC.Widget.Events.PLAY, () => {
-      widget.getCurrentSoundIndex((i) => {
-        const idx = typeof i === 'number' ? i : state.index;
-        if (idx !== state.index) {
-          state.index = idx;
-          state.currentTime = 0;
-          renderTrack();
-        }
-        state.playing = true;
-        renderPlayState();
-      });
-    });
+  // ── Edit this list to block genres from ever being queried ──
+  const GENRE_BLACKLIST = ['lofi', 'ambient'];
 
-    widget.bind(SC.Widget.Events.PAUSE, () => {
-      state.playing = false;
+  const WEATHER_GENRE_PRIORITY = {
+    sunny:    ['happy', 'pop', 'upbeat'],
+    breezy:   ['indie', 'folk', 'chill'],
+    overcast: ['lofi', 'chill', 'indie'],
+    foggy:    ['ambient', 'dreamy', 'atmospheric'],
+    drizzle:  ['jazz', 'cafe', 'soul'],
+    rainy:    ['blues', 'soul', 'rnb'],
+    snowy:    ['classical', 'piano', 'neoclassical'],
+    showers:  ['acoustic', 'folk', 'singer-songwriter'],
+    stormy:   ['instrumental', 'post-rock', 'cinematic'],
+  };
+
+  function weatherToTags(code) {
+    let key;
+    if (code === 0)       key = 'sunny';
+    else if (code <= 2)   key = 'breezy';
+    else if (code <= 3)   key = 'overcast';
+    else if (code <= 48)  key = 'foggy';
+    else if (code <= 55)  key = 'drizzle';
+    else if (code <= 65)  key = 'rainy';
+    else if (code <= 77)  key = 'snowy';
+    else if (code <= 82)  key = 'showers';
+    else                  key = 'stormy';
+    const options = WEATHER_GENRE_PRIORITY[key];
+    return options.find(t => !GENRE_BLACKLIST.includes(t)) ?? options[0];
+  }
+
+  async function fetchJamendoTracks(tags) {
+    const res = await fetch(
+      'https://api.jamendo.com/v3.0/tracks/' +
+      '?client_id=' + JAMENDO_ID +
+      '&format=json&limit=50&audioformat=mp32&orderby=popularity_month' +
+      '&tags=' + encodeURIComponent(tags) +
+      '&imagesize=500'
+    );
+    const d = await res.json();
+    return d.results || [];
+  }
+
+  function getHistory() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return raw.filter(e => e.ts > Date.now() - 7 * 86400000);
+    } catch (_) { return []; }
+  }
+
+  function appendHistory(ids) {
+    const updated = [...getHistory(), ...ids.map(id => ({ id, ts: Date.now() }))];
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(updated)); } catch (_) {}
+  }
+
+  async function buildPlaylist() {
+    const code    = await getHanoiWeatherCode();
+    const tags    = weatherToTags(code);
+    const results = await fetchJamendoTracks(tags);
+    const historySet = new Set(getHistory().map(e => e.id));
+    const fresh = results
+      .filter(t => t.audio && !historySet.has(String(t.id)))
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 12)
+      .map((t, i) => ({
+        id:       String(t.id),
+        title:    t.name,
+        artist:   t.artist_name,
+        duration: t.duration,
+        cover:    t.album_image,
+        url:      t.audio,
+        color:    TRACK_COLORS[i % TRACK_COLORS.length],
+      }));
+    appendHistory(fresh.map(t => t.id));
+    return fresh;
+  }
+
+  async function loadPlaylist() {
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const cached = JSON.parse(localStorage.getItem(PLAYLIST_KEY) || 'null');
+      if (cached?.date === today && cached.tracks?.length === 12) return cached.tracks;
+    } catch (_) {}
+    const list = await buildPlaylist();
+    try { localStorage.setItem(PLAYLIST_KEY, JSON.stringify({ date: today, tracks: list })); } catch (_) {}
+    return list;
+  }
+
+  // ─── Audio player ───────────────────────────────────
+  async function initPlayer() {
+    audio = document.getElementById('player-audio');
+
+    skipTo = (idx) => {
+      if (idx < 0 || idx >= tracks.length) return;
+      state.index    = idx;
+      state.currentTime = 0;
+      audio.src = tracks[idx].url;
+      audio.play().catch(() => {});
+      renderTrack();
       renderPlayState();
+    };
+
+    trackTitle.textContent = 'Loading playlist…';
+    try { tracks = await loadPlaylist(); }
+    catch (_) { trackTitle.textContent = 'Could not load playlist.'; return; }
+
+    state.index = 0;
+    if (tracks[0]) audio.src = tracks[0].url;
+    renderTrack();
+    renderPlayState();
+
+    audio.addEventListener('play',  () => { state.playing = true;  renderPlayState(); });
+    audio.addEventListener('pause', () => { state.playing = false; renderPlayState(); });
+
+    audio.addEventListener('loadedmetadata', () => {
+      if (!isNaN(audio.duration)) {
+        tracks[state.index].duration = Math.round(audio.duration);
+        totalTimeEl.textContent = fmt(tracks[state.index].duration);
+        renderProgress();
+      }
     });
 
-    // ~250ms interval progress updates from the widget
-    widget.bind(SC.Widget.Events.PLAY_PROGRESS, (e) => {
+    audio.addEventListener('timeupdate', () => {
       if (state.dragging) return;
-      state.currentTime = Math.round(e.currentPosition / 1000);
+      state.currentTime = Math.floor(audio.currentTime);
       renderProgress();
     });
 
-    // Track finished — handle shuffle manually; otherwise widget auto-advances
-    widget.bind(SC.Widget.Events.FINISH, () => {
-      if (state.shuffle) {
-        widget.skip(shuffleNext());
-      }
-      // non-shuffle: SC widget auto-plays next track, PLAY event fires
+    audio.addEventListener('ended', () => {
+      skipTo(state.shuffle ? shuffleNext() : (state.index + 1) % tracks.length);
     });
   }
 
   // ─── Seek ──────────────────────────────────────────
   function seekByPct(pct) {
     pct = clamp(pct, 0, 1);
-    const t = tracks[state.index];
-    if (!t) return;
-    const ms = Math.round(pct * t.duration * 1000);
-    if (widget) widget.seekTo(ms);
-    state.currentTime = Math.round(pct * t.duration);
+    if (!audio) return;
+    const dur = tracks[state.index]?.duration || audio.duration || 0;
+    const s   = pct * dur;
+    audio.currentTime  = s;
+    state.currentTime  = Math.floor(s);
     renderProgress();
   }
 
@@ -1201,19 +1288,21 @@
   });
 
   // ─── Controls ──────────────────────────────────────
-  playBtn.addEventListener('click', () => { if (widget) widget.toggle(); });
+  playBtn.addEventListener('click', () => {
+    if (!audio) return;
+    audio.paused ? audio.play().catch(() => {}) : audio.pause();
+  });
 
   nextBtn.addEventListener('click', () => {
-    if (!widget) return;
-    widget.skip(state.shuffle ? shuffleNext() : (state.index + 1) % Math.max(tracks.length, 1));
+    skipTo(state.shuffle ? shuffleNext() : (state.index + 1) % Math.max(tracks.length, 1));
   });
 
   prevBtn.addEventListener('click', () => {
-    if (!widget) return;
+    if (!audio) return;
     if (state.currentTime > 3) {
-      widget.seekTo(0);
+      audio.currentTime = 0;
     } else {
-      widget.skip((state.index - 1 + Math.max(tracks.length, 1)) % Math.max(tracks.length, 1));
+      skipTo((state.index - 1 + Math.max(tracks.length, 1)) % Math.max(tracks.length, 1));
     }
   });
 
@@ -1269,8 +1358,8 @@
     const t = tracks[state.index];
     switch (e.code) {
       case 'Space':      e.preventDefault(); playBtn.click(); break;
-      case 'ArrowRight': e.preventDefault(); if (t && widget) { const s = clamp(state.currentTime + 5, 0, t.duration); widget.seekTo(s * 1000); state.currentTime = s; renderProgress(); } break;
-      case 'ArrowLeft':  e.preventDefault(); if (t && widget) { const s = clamp(state.currentTime - 5, 0, t.duration); widget.seekTo(s * 1000); state.currentTime = s; renderProgress(); } break;
+      case 'ArrowRight': e.preventDefault(); if (t && audio) { const s = clamp(state.currentTime + 5, 0, t.duration); audio.currentTime = s; state.currentTime = s; renderProgress(); } break;
+      case 'ArrowLeft':  e.preventDefault(); if (t && audio) { const s = clamp(state.currentTime - 5, 0, t.duration); audio.currentTime = s; state.currentTime = s; renderProgress(); } break;
       case 'KeyN':       nextBtn.click(); break;
       case 'KeyP':       prevBtn.click(); break;
       case 'KeyL':       likeBtn.click(); break;
@@ -1294,9 +1383,9 @@
   })();
 
   // ─── Init ──────────────────────────────────────────
-  renderTrack();   // shows "Loading…" until SC is ready
+  renderTrack();
   renderPlayState();
-  initWidget();
+  initPlayer();
 
   // ─── Background warp (WebGL) ─────────────────────────
   (function initBgWarp() {
@@ -1475,6 +1564,7 @@
       } catch (_) {}
     }, () => {});
   })();
+
 </script>
 </body>
 </html>

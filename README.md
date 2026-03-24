@@ -1,6 +1,6 @@
 # Conditional®
 
-A single-file music player with a weather-aware daily playlist. **[Live →](https://thinhngx.github.io/music-player/)**
+A single-file music player with a weather-aware daily playlist. **[Live →](https://thinhngx.github.io/conditional-player/)**
 
 ---
 

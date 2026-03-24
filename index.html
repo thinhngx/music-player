@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Music Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@500&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -16,10 +18,110 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #EDECEA;
+      background: #ffffff;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body { background: #000000; }
+      #app-container { outline: 1px solid rgba(255, 255, 255, 0.1); }
+    }
+
+    @media (prefers-color-scheme: light) {
+      body { background: #ffffff; }
+      #app-container { outline: 1px solid rgba(0, 0, 0, 0.1); }
+    }
+
+    #app-container {
+      position: relative;
+      width: calc(100vw - 32px);
+      height: calc(100vh - 32px);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      outline-offset: -1px;
+    }
+
+    #bg-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 1.6s ease;
+    }
+
+    body.artwork-loaded #bg-canvas {
+      opacity: 1;
+    }
+
+    #bg-blur {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      -webkit-backdrop-filter: blur(52px) brightness(0.6) saturate(1.3);
+      backdrop-filter: blur(52px) brightness(0.6) saturate(1.3);
+    }
+
+    #app-container::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 200px 200px;
+      opacity: 0.22;
+      mix-blend-mode: overlay;
+    }
+
+    /* ─── Weather widget ─────────────────────────── */
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+
+    #weather-widget {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    #weather-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ffffff;
+      flex-shrink: 0;
+      animation: blink 1.4s ease-in-out infinite;
+    }
+
+    #weather-condition,
+    #weather-location {
+      font-family: 'Geist Mono', monospace;
+      font-weight: 500;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.85);
+      white-space: nowrap;
+      line-height: 1;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    }
+
+    #weather-location {
+      opacity: 0.5;
     }
 
     /* ─── Player outer wrapper ────────────────────── */
@@ -28,6 +130,7 @@
       flex-direction: column;
       align-items: center;
       position: relative;
+      z-index: 3;
     }
 
     /* ─── Player Card (horizontal flex container) ─── */
@@ -50,6 +153,7 @@
       flex-direction: column;
       gap: 16px;
       padding: 16px 16px 38px;
+      transition: padding 0.32s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     /* Mini mode overrides on the content column */
@@ -81,6 +185,16 @@
       display: flex;
       flex-direction: column;
       gap: 16px;
+      transform: translateY(0px);
+      filter: blur(0px);
+      transition:
+        transform 0.36s cubic-bezier(0.4, 0, 0.2, 1),
+        filter 0.28s ease;
+    }
+
+    .player.mini .full-only-inner {
+      transform: translateY(-10px);
+      filter: blur(8px);
     }
 
     /* ─── Album Art ───────────────────────────────── */
@@ -376,13 +490,71 @@
       flex-direction: column;
       overflow: hidden;
       max-height: 0;
-      transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0;
+      filter: blur(6px);
+      transform: translateY(-6px);
+      transition:
+        max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.22s ease,
+        filter 0.24s ease,
+        transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
       margin: 0 -4px;
     }
 
     .queue.open {
-      max-height: 400px;
+      max-height: 242px; /* 5.5 items × 44px */
+      overflow-y: auto;
+      opacity: 1;
+      filter: blur(0px);
+      transform: translateY(0px);
     }
+
+    /* In mini mode, cancel the phantom 12px flex gap before the 0-height queue */
+    .player.mini .queue {
+      margin-top: -12px;
+      transition:
+        max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.22s ease,
+        filter 0.24s ease,
+        transform 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+        margin-top 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+
+    .player.mini .queue:hover {
+      scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+    }
+
+    .player.mini .queue::-webkit-scrollbar { width: 4px; }
+    .player.mini .queue::-webkit-scrollbar-track { background: transparent; }
+    .player.mini .queue::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 2px;
+    }
+    .player.mini .queue:hover::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); }
+
+    .player.mini .queue.open {
+      margin-top: 0;
+    }
+
+    /* Sticky bottom gradient for mini queue — signals more content to scroll */
+    .player.mini .queue::after {
+      content: '';
+      display: block;
+      position: sticky;
+      bottom: 0;
+      height: 22px;
+      background: linear-gradient(to top, white, transparent);
+      pointer-events: none;
+      margin-top: -22px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .player.mini .queue.open::after       { opacity: 1; }
+    .player.mini .queue.at-bottom::after  { opacity: 0; }
 
     /* Queue only usable in mini mode */
     .player:not(.mini) .queue-divider,
@@ -456,6 +628,7 @@
       width: 0;
       overflow: hidden;
       flex-shrink: 0;
+      position: relative; /* anchor for absolutely-positioned inner + fade */
       transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
@@ -468,15 +641,62 @@
     }
 
     .queue-panel-inner {
+      position: absolute; /* out of flow — can't affect card height */
+      top: 0;
+      left: 0;
+      bottom: 0;
       width: 180px;
-      height: 100%;
+      overflow-y: auto;
       border-left: 1px solid rgba(0, 0, 0, 0.08);
       padding: 12px;
       display: flex;
       flex-direction: column;
       gap: 8px;
       align-items: stretch;
+      transform: translateX(16px);
+      filter: blur(8px);
+      opacity: 0;
+      transition:
+        transform 0.30s cubic-bezier(0.4, 0, 0.2, 1),
+        filter 0.25s ease,
+        opacity 0.25s ease;
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
     }
+
+    .queue-panel.open .queue-panel-inner {
+      transform: translateX(0px);
+      filter: blur(0px);
+      opacity: 1;
+    }
+
+    .queue-panel-inner:hover {
+      scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+    }
+
+    .queue-panel-inner::-webkit-scrollbar { width: 4px; }
+    .queue-panel-inner::-webkit-scrollbar-track { background: transparent; }
+    .queue-panel-inner::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 2px;
+    }
+    .queue-panel-inner:hover::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); }
+
+    /* Gradient fade at bottom of full queue panel */
+    .queue-panel-fade {
+      position: absolute;
+      bottom: 0;
+      left: 1px; /* clear the border-left */
+      right: 0;
+      height: 40px;
+      background: linear-gradient(to top, white, transparent);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .queue-panel.open .queue-panel-fade       { opacity: 1; }
+    .queue-panel.at-bottom .queue-panel-fade  { opacity: 0; }
 
     .queue-panel-item {
       display: flex;
@@ -544,6 +764,9 @@
 </head>
 <body>
 
+<div id="app-container">
+<canvas id="bg-canvas"></canvas>
+<div id="bg-blur"></div>
 <div class="player-outer">
 <div class="player" id="player">
 
@@ -632,6 +855,7 @@
   <!-- Queue panel (full mode only, horizontal expansion via double-click) -->
   <div class="queue-panel" id="queue-panel">
     <div class="queue-panel-inner" id="queue-panel-inner"></div>
+    <div class="queue-panel-fade"></div>
   </div>
 
 </div><!-- end .player -->
@@ -644,6 +868,14 @@
 </button>
 
 </div><!-- end .player-outer -->
+
+<div id="weather-widget">
+  <span id="weather-dot"></span>
+  <span id="weather-condition"></span>
+  <span id="weather-location"></span>
+</div>
+
+</div><!-- end #app-container -->
 
 <!-- Hidden SoundCloud widget iframe (must be in DOM for audio to work) -->
 <iframe id="sc-iframe"
@@ -903,22 +1135,56 @@
     if (mini  && state.fullQueueOpen) setFullQueueOpen(false);
   }
 
+  function updateMiniQueueFade() {
+    const atBottom = queueEl.scrollTop + queueEl.clientHeight >= queueEl.scrollHeight - 2;
+    queueEl.classList.toggle('at-bottom', atBottom);
+  }
+
+  function updateFullQueueFade() {
+    const atBottom = queuePanelInner.scrollTop + queuePanelInner.clientHeight >= queuePanelInner.scrollHeight - 2;
+    queuePanel.classList.toggle('at-bottom', atBottom);
+  }
+
   function setQueueOpen(open) {
     state.queueOpen = open;
     queueEl.classList.toggle('open', open);
     queueDivider.classList.toggle('visible', open);
+    if (open) {
+      queueEl.scrollTop = 0;
+      queueEl.classList.remove('at-bottom');
+      updateMiniQueueFade();
+      queueEl.addEventListener('scroll', updateMiniQueueFade);
+    } else {
+      queueEl.removeEventListener('scroll', updateMiniQueueFade);
+      queueEl.classList.remove('at-bottom');
+    }
   }
 
   function setFullQueueOpen(open) {
     state.fullQueueOpen = open;
     queuePanel.classList.toggle('open', open);
     playerEl.classList.toggle('queue-open', open);
+    if (open) {
+      queuePanelInner.scrollTop = 0;
+      queuePanel.classList.remove('at-bottom');
+      updateFullQueueFade();
+      queuePanelInner.addEventListener('scroll', updateFullQueueFade);
+    } else {
+      queuePanelInner.removeEventListener('scroll', updateFullQueueFade);
+      queuePanel.classList.remove('at-bottom');
+    }
   }
 
   collapseBtn.addEventListener('click', () => {
     if (!state.mini && state.fullQueueOpen) {
+      // Collapsing with full queue open: close panel first, then collapse
       setFullQueueOpen(false);
       setTimeout(() => setMini(true), 280);
+    } else if (state.mini && state.queueOpen) {
+      // Expanding with mini queue open: collapse list first,
+      // album art starts expanding at 80% of the list's travel (224ms)
+      setQueueOpen(false);
+      setTimeout(() => setMini(false), 224);
     } else {
       setMini(!state.mini);
     }
@@ -1013,10 +1279,202 @@
     }
   });
 
+  // ─── Unsplash wallpaper background ─────────────────
+  (function loadWallpaper() {
+    // picsum.photos proxies Unsplash — CORS-safe, new image every load
+    const url = `https://picsum.photos/1920/1080?t=${Date.now()}`;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      document.body.classList.add('artwork-loaded');
+      if (window.bgLoadTexture) window.bgLoadTexture(img.src);
+    };
+    img.onerror = () => { /* fall back to solid color */ };
+    img.src = url;
+  })();
+
   // ─── Init ──────────────────────────────────────────
   renderTrack();   // shows "Loading…" until SC is ready
   renderPlayState();
   initWidget();
+
+  // ─── Background warp (WebGL) ─────────────────────────
+  (function initBgWarp() {
+    const canvas = document.getElementById('bg-canvas');
+    const gl = canvas.getContext('webgl');
+    if (!gl) return;
+
+    const VS = `
+      attribute vec2 a_pos;
+      varying vec2 v_uv;
+      void main() {
+        v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5);
+        gl_Position = vec4(a_pos, 0.0, 1.0);
+      }
+    `;
+
+    const FS = `
+      precision mediump float;
+      uniform sampler2D u_tex;
+      uniform float u_time;
+      uniform vec2 u_res;
+      uniform vec2 u_imgSize;
+      varying vec2 v_uv;
+
+      float hash(vec2 p) {
+        p = fract(p * vec2(127.1, 311.7));
+        p += dot(p, p + 19.19);
+        return fract(p.x * p.y);
+      }
+      float vnoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+          f.y
+        );
+      }
+      vec2 domainWarp(vec2 uv, float t) {
+        vec2 q = vec2(
+          vnoise(uv * 2.3 + t * 0.07),
+          vnoise(uv * 2.3 + vec2(5.2, 1.3) + t * 0.055)
+        );
+        vec2 r = vec2(
+          vnoise(uv * 2.3 + 4.0 * q + vec2(1.7, 9.2) + t * 0.04),
+          vnoise(uv * 2.3 + 4.0 * q + vec2(8.3, 2.8) + t * 0.032)
+        );
+        return 0.05 * r + 0.022 * q;
+      }
+
+      void main() {
+        /* background-size: cover */
+        float cr = u_res.x / u_res.y;
+        float ir = u_imgSize.x / u_imgSize.y;
+        vec2 scale = cr > ir ? vec2(1.0, ir / cr) : vec2(cr / ir, 1.0);
+        vec2 baseUV = (v_uv - 0.5) * scale + 0.5;
+
+        vec2 offset = domainWarp(v_uv * vec2(cr, 1.0), u_time);
+        vec2 uv = clamp(baseUV + offset, 0.0, 1.0);
+
+        gl_FragColor = vec4(texture2D(u_tex, uv).rgb, 1.0);
+      }
+    `;
+
+    function compileShader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const uTime    = gl.getUniformLocation(prog, 'u_time');
+    const uRes     = gl.getUniformLocation(prog, 'u_res');
+    const uImgSize = gl.getUniformLocation(prog, 'u_imgSize');
+
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // 1×1 transparent pixel until image loads
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
+
+    let imgW = 1, imgH = 1, ready = false;
+
+    window.bgLoadTexture = function(url) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        imgW = img.naturalWidth;
+        imgH = img.naturalHeight;
+        ready = true;
+      };
+      img.src = url;
+    };
+
+    const container = document.getElementById('app-container');
+    function resize() {
+      canvas.width  = container.clientWidth;
+      canvas.height = container.clientHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    let t = Math.random() * 60;
+    function draw() {
+      if (ready) {
+        t += 0.004;
+        gl.uniform1f(uTime, t);
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform2f(uImgSize, imgW, imgH);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+      requestAnimationFrame(draw);
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+    draw();
+  })();
+
+  // ─── Weather ────────────────────────────────────────
+  (function initWeather() {
+    const condEl = document.getElementById('weather-condition');
+    const locEl  = document.getElementById('weather-location');
+
+    function codeToLabel(code) {
+      if (code === 0)  return 'sunny';
+      if (code <= 1)   return 'mostly clear';
+      if (code <= 2)   return 'partly cloudy';
+      if (code <= 3)   return 'overcast';
+      if (code <= 48)  return 'foggy';
+      if (code <= 55)  return 'drizzly';
+      if (code <= 65)  return 'rainy';
+      if (code <= 77)  return 'snowy';
+      if (code <= 82)  return 'showery';
+      return 'stormy';
+    }
+
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+      const { latitude: lat, longitude: lon } = coords;
+      try {
+        const [geoRes, wxRes] = await Promise.all([
+          fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
+            headers: { 'Accept-Language': 'en-US,en' }
+          }),
+          fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weathercode`)
+        ]);
+        const [geo, wx] = await Promise.all([geoRes.json(), wxRes.json()]);
+
+        const addr    = geo.address;
+        const city    = addr.city || addr.town || addr.village || addr.county || addr.state || 'Unknown';
+        const country = (addr.country_code || '').toUpperCase();
+        const temp    = Math.round(wx.current.temperature_2m);
+        const label   = codeToLabel(wx.current.weathercode);
+
+        condEl.textContent = `Now is ${temp}°C, ${label}. `;
+        locEl.textContent  = `${city}, ${country}.`;
+      } catch (_) {}
+    }, () => {});
+  })();
 </script>
 </body>
 </html>

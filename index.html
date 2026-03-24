@@ -899,7 +899,7 @@
 
 </div><!-- end #app-container -->
 
-<audio id="player-audio" preload="metadata" style="display:none"></audio>
+<script src="https://w.soundcloud.com/player/api.js"></script>
 <script>
   // ─── Track colors (fallback while art loads / if no art) ───
   const TRACK_COLORS = [
@@ -910,7 +910,7 @@
 
   // ─── State ─────────────────────────────────────────
   let tracks = [];
-  let audio  = null;
+  let widget = null;
   let skipTo = () => {}; // stubbed until initPlayer runs
 
   const state = {
@@ -1070,10 +1070,9 @@
     });
   }
 
-  // ─── Jamendo playlist ──────────────────────────────
-  const JAMENDO_ID      = 'b06bbe12';
-  const PLAYLIST_KEY    = 'cp_playlist_v2';
-  const HISTORY_KEY     = 'cp_history_v2';
+  // ─── SoundCloud playlist ───────────────────────────
+  const PLAYLIST_KEY = 'cp_playlist_v3';
+  const HISTORY_KEY  = 'cp_history_v3';
 
   async function getHanoiWeatherCode() {
     try {
@@ -1102,6 +1101,33 @@
     stormy:   ['instrumental', 'post-rock', 'cinematic'],
   };
 
+  // ── Curated SoundCloud playlists per genre ──────────
+  const SOUNDCLOUD_GENRE_PLAYLISTS = {
+    happy:                ['https://soundcloud.com/soundcloud-stories/sets/party-bangers-2024-pop-edition', 'https://soundcloud.com/scandinavianz/sets/upbeat-instrumental-music'],
+    pop:                  ['https://soundcloud.com/soundcloud-stories/sets/party-bangers-2024-pop-edition'],
+    upbeat:               ['https://soundcloud.com/scandinavianz/sets/upbeat-instrumental-music'],
+    indie:                ['https://soundcloud.com/alexrainbirdmusic/sets/take-it-slow', 'https://soundcloud.com/alexrainbirdmusic/sets/acoustic-evenings-a-cozy-indie'],
+    folk:                 ['https://soundcloud.com/alexrainbirdmusic/sets/folk-acoustic'],
+    chill:                ['https://soundcloud.com/alexrainbirdmusic/sets/take-it-slow'],
+    lofi:                 ['https://soundcloud.com/sc-playlists/sets/lo-fi-chill-beats'],
+    ambient:              ['https://soundcloud.com/teo-salfinger/sets/ambient'],
+    dreamy:               ['https://soundcloud.com/mitchell-nelli/sets/dreamy-ambient'],
+    atmospheric:          ['https://soundcloud.com/teo-salfinger/sets/ambient'],
+    jazz:                 ['https://soundcloud.com/jazzhopcafe/sets/the-jazz-hop-cafe-mixes', 'https://soundcloud.com/jazzinstrumentalsongscafe/sets/jazz-cafe-1-hour-a-collection'],
+    cafe:                 ['https://soundcloud.com/jazzinstrumentalsongscafe/sets/jazz-cafe-1-hour-a-collection'],
+    soul:                 ['https://soundcloud.com/jazzhopcafe/sets/the-jazz-hop-cafe-mixes'],
+    blues:                ['https://soundcloud.com/loudassmusic/sets/southern-soul-blues-mix-2024-1'],
+    rnb:                  ['https://soundcloud.com/loudassmusic/sets/southern-soul-blues-mix-2024-1'],
+    classical:            ['https://soundcloud.com/klangspot/sets/modern-piano-essentials'],
+    piano:                ['https://soundcloud.com/klangspot/sets/modern-piano-essentials'],
+    neoclassical:         ['https://soundcloud.com/astropilot/sets/piano-neoclassical-focus-neo', 'https://soundcloud.com/ad21music/sets/ad21-neoclassical-piano-music'],
+    acoustic:             ['https://soundcloud.com/alexrainbirdmusic/sets/folk-acoustic', 'https://soundcloud.com/ftlobmusic/sets/lazy-indie-morning'],
+    'singer-songwriter':  ['https://soundcloud.com/alexrainbirdmusic/sets/folk-acoustic'],
+    instrumental:         ['https://soundcloud.com/liquidcinema/sets/voyager-cinematic-post-rock', 'https://soundcloud.com/harmonix_hub/sets/post-rock-instrumental-beats'],
+    'post-rock':          ['https://soundcloud.com/liquidcinema/sets/voyager-cinematic-post-rock'],
+    cinematic:            ['https://soundcloud.com/liquidcinema/sets/voyager-cinematic-post-rock', 'https://soundcloud.com/weekendchilloutmusiczone/sets/instrumental-music-2024'],
+  };
+
   function weatherToTags(code) {
     let key;
     if (code === 0)       key = 'sunny';
@@ -1117,18 +1143,6 @@
     return options.find(t => !GENRE_BLACKLIST.includes(t)) ?? options[0];
   }
 
-  async function fetchJamendoTracks(tags) {
-    const res = await fetch(
-      'https://api.jamendo.com/v3.0/tracks/' +
-      '?client_id=' + JAMENDO_ID +
-      '&format=json&limit=50&audioformat=mp32&orderby=popularity_month' +
-      '&tags=' + encodeURIComponent(tags) +
-      '&imagesize=500'
-    );
-    const d = await res.json();
-    return d.results || [];
-  }
-
   function getHistory() {
     try {
       const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
@@ -1141,92 +1155,115 @@
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(updated)); } catch (_) {}
   }
 
+  // Returns a SoundCloud playlist URL for today's weather.
+  // History tracks recently used playlist URLs to avoid repeating.
   async function buildPlaylist() {
-    const code    = await getHanoiWeatherCode();
-    const tags    = weatherToTags(code);
-    const results = await fetchJamendoTracks(tags);
+    const code       = await getHanoiWeatherCode();
+    const tag        = weatherToTags(code);
+    const candidates = SOUNDCLOUD_GENRE_PLAYLISTS[tag] || SOUNDCLOUD_GENRE_PLAYLISTS['chill'];
     const historySet = new Set(getHistory().map(e => e.id));
-    const fresh = results
-      .filter(t => t.audio && !historySet.has(String(t.id)))
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 12)
-      .map((t, i) => ({
-        id:       String(t.id),
-        title:    t.name,
-        artist:   t.artist_name,
-        duration: t.duration,
-        cover:    t.album_image,
-        url:      t.audio,
-        color:    TRACK_COLORS[i % TRACK_COLORS.length],
-      }));
-    appendHistory(fresh.map(t => t.id));
-    return fresh;
+    const fresh      = candidates.filter(url => !historySet.has(url));
+    const pool       = fresh.length > 0 ? fresh : candidates;
+    const url        = pool[Math.floor(Math.random() * pool.length)];
+    appendHistory([url]);
+    return url;
   }
 
   async function loadPlaylist() {
     const today = new Date().toISOString().split('T')[0];
     try {
       const cached = JSON.parse(localStorage.getItem(PLAYLIST_KEY) || 'null');
-      if (cached?.date === today && cached.tracks?.length === 12) return cached.tracks;
+      if (cached?.date === today && cached.url) return cached.url;
     } catch (_) {}
-    const list = await buildPlaylist();
-    try { localStorage.setItem(PLAYLIST_KEY, JSON.stringify({ date: today, tracks: list })); } catch (_) {}
-    return list;
+    const url = await buildPlaylist();
+    try { localStorage.setItem(PLAYLIST_KEY, JSON.stringify({ date: today, url })); } catch (_) {}
+    return url;
   }
 
-  // ─── Audio player ───────────────────────────────────
+  // ─── SoundCloud Widget player ───────────────────────
   async function initPlayer() {
-    audio = document.getElementById('player-audio');
+    trackTitle.textContent = 'Loading playlist…';
+
+    let playlistUrl;
+    try { playlistUrl = await loadPlaylist(); }
+    catch (_) { trackTitle.textContent = 'Could not load playlist.'; return; }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'sc-iframe';
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;border:0;';
+    iframe.allow = 'autoplay';
+    iframe.src =
+      'https://w.soundcloud.com/player/?url=' + encodeURIComponent(playlistUrl) +
+      '&auto_play=false&buying=false&liking=false&download=false&sharing=false' +
+      '&show_comments=false&show_user=false&hide_related=true&visual=false&callback=true';
+    document.body.appendChild(iframe);
+
+    widget = SC.Widget(iframe);
 
     skipTo = (idx) => {
       if (idx < 0 || idx >= tracks.length) return;
-      state.index    = idx;
+      state.index = idx;
       state.currentTime = 0;
-      audio.src = tracks[idx].url;
-      audio.play().catch(() => {});
+      widget.skip(idx);
+      widget.play();
       renderTrack();
       renderPlayState();
     };
 
-    trackTitle.textContent = 'Loading playlist…';
-    try { tracks = await loadPlaylist(); }
-    catch (_) { trackTitle.textContent = 'Could not load playlist.'; return; }
-
-    state.index = 0;
-    if (tracks[0]) audio.src = tracks[0].url;
-    renderTrack();
-    renderPlayState();
-
-    audio.addEventListener('play',  () => { state.playing = true;  renderPlayState(); });
-    audio.addEventListener('pause', () => { state.playing = false; renderPlayState(); });
-
-    audio.addEventListener('loadedmetadata', () => {
-      if (!isNaN(audio.duration)) {
-        tracks[state.index].duration = Math.round(audio.duration);
-        totalTimeEl.textContent = fmt(tracks[state.index].duration);
-        renderProgress();
-      }
+    widget.bind(SC.Widget.Events.READY, () => {
+      widget.getSounds(sounds => {
+        tracks = sounds.map((s, i) => ({
+          id:       String(s.id),
+          title:    s.title,
+          artist:   s.user ? s.user.username : '',
+          duration: Math.round((s.duration || 0) / 1000),
+          cover:    s.artwork_url ? s.artwork_url.replace('-large', '-t500x500') : null,
+          color:    TRACK_COLORS[i % TRACK_COLORS.length],
+        }));
+        state.index = 0;
+        renderTrack();
+        renderPlayState();
+      });
     });
 
-    audio.addEventListener('timeupdate', () => {
+    widget.bind(SC.Widget.Events.PLAY, () => {
+      widget.getCurrentSoundIndex(i => {
+        const idx = typeof i === 'number' ? i : state.index;
+        if (idx !== state.index) {
+          state.index = idx;
+          state.currentTime = 0;
+          renderTrack();
+        }
+        state.playing = true;
+        renderPlayState();
+      });
+    });
+
+    widget.bind(SC.Widget.Events.PAUSE, () => {
+      state.playing = false;
+      renderPlayState();
+    });
+
+    widget.bind(SC.Widget.Events.PLAY_PROGRESS, data => {
       if (state.dragging) return;
-      state.currentTime = Math.floor(audio.currentTime);
+      state.currentTime = Math.floor(data.currentPosition / 1000);
       renderProgress();
     });
 
-    audio.addEventListener('ended', () => {
-      skipTo(state.shuffle ? shuffleNext() : (state.index + 1) % tracks.length);
+    widget.bind(SC.Widget.Events.FINISH, () => {
+      const next = state.shuffle ? shuffleNext() : (state.index + 1) % Math.max(tracks.length, 1);
+      skipTo(next);
     });
   }
 
   // ─── Seek ──────────────────────────────────────────
   function seekByPct(pct) {
     pct = clamp(pct, 0, 1);
-    if (!audio) return;
-    const dur = tracks[state.index]?.duration || audio.duration || 0;
+    if (!widget) return;
+    const dur = tracks[state.index]?.duration || 0;
     const s   = pct * dur;
-    audio.currentTime  = s;
-    state.currentTime  = Math.floor(s);
+    widget.seekTo(s * 1000);
+    state.currentTime = Math.floor(s);
     renderProgress();
   }
 
@@ -1311,8 +1348,8 @@
 
   // ─── Controls ──────────────────────────────────────
   playBtn.addEventListener('click', () => {
-    if (!audio) return;
-    audio.paused ? audio.play().catch(() => {}) : audio.pause();
+    if (!widget) return;
+    state.playing ? widget.pause() : widget.play();
   });
 
   nextBtn.addEventListener('click', () => {
@@ -1320,9 +1357,11 @@
   });
 
   prevBtn.addEventListener('click', () => {
-    if (!audio) return;
+    if (!widget) return;
     if (state.currentTime > 3) {
-      audio.currentTime = 0;
+      widget.seekTo(0);
+      state.currentTime = 0;
+      renderProgress();
     } else {
       skipTo((state.index - 1 + Math.max(tracks.length, 1)) % Math.max(tracks.length, 1));
     }
@@ -1380,8 +1419,8 @@
     const t = tracks[state.index];
     switch (e.code) {
       case 'Space':      e.preventDefault(); playBtn.click(); break;
-      case 'ArrowRight': e.preventDefault(); if (t && audio) { const s = clamp(state.currentTime + 5, 0, t.duration); audio.currentTime = s; state.currentTime = s; renderProgress(); } break;
-      case 'ArrowLeft':  e.preventDefault(); if (t && audio) { const s = clamp(state.currentTime - 5, 0, t.duration); audio.currentTime = s; state.currentTime = s; renderProgress(); } break;
+      case 'ArrowRight': e.preventDefault(); if (t && widget) { const s = clamp(state.currentTime + 5, 0, t.duration); widget.seekTo(s * 1000); state.currentTime = s; renderProgress(); } break;
+      case 'ArrowLeft':  e.preventDefault(); if (t && widget) { const s = clamp(state.currentTime - 5, 0, t.duration); widget.seekTo(s * 1000); state.currentTime = s; renderProgress(); } break;
       case 'KeyN':       nextBtn.click(); break;
       case 'KeyP':       prevBtn.click(); break;
       case 'KeyL':       likeBtn.click(); break;
